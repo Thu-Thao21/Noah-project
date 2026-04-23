@@ -1,0 +1,36 @@
+_format_version: "3.0"
+
+services:
+  - name: order-service
+    url: http://order-api:8000
+    routes:
+      - name: order-route
+        paths:
+          - /orders
+    plugins:
+      - name: key-auth
+        config:
+          key_names: ["X-API-Key"]
+          hide_credentials: true
+      - name: rate-limiting
+        config:
+          minute: 10
+          limit_by: header
+          header_name: X-API-Key
+
+  - name: report-service
+    url: http://order-api:8000
+    routes:
+      - name: report-route
+        paths:
+          - /report
+    plugins:
+      - name: key-auth
+        config:
+          key_names: ["X-API-Key"]
+          hide_credentials: true
+      - name: rate-limiting
+        config:
+          minute: 20
+          limit_by: header
+          header_name: X-API-Key

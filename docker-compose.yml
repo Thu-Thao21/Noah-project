@@ -1,0 +1,156 @@
+version: '3.8'
+
+services:
+  # --- TẦNG DỮ LIỆU ---
+  mysql:
+    image: mysql:8.0
+    container_name: mysql_db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: noah_sales 
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - noah_network
+
+  postgres:
+    image: postgres:15
+    container_name: postgres_db
+    restart: always
+    environment:
+      POSTGRES_DB: noah_finance
+      POSTGRES_PASSWORD: root
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres_init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - noah_network
+
+  # --- MESSAGE QUEUE & CACHE ---
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq_server
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"   # AMQP port cho ứng dụng
+      - "15672:15672" # Dashboard quản lý RabbitMQ
+    networks:
+      - noah_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis_cache
+    restart: always
+    ports:
+      - "6379:6379"
+    networks:
+      - noah_network
+
+  # --- BẢO MẬT (GATEWAY) ---
+  kong:
+    image: kong:latest
+    container_name: kong_gateway
+    environment:
+      KONG_DATABASE: "off" # Chạy mode dbless cho nhẹ
+      KONG_DECLARATIVE_CONFIG: /usr/local/kong/declarative/kong.yml
+    volumes:
+      - ./kong.yml:/usr/local/kong/declarative/kong.yml
+    ports:
+      - "8000:8000"
+    networks:
+      - noah_network
+
+  # --- APP MODULES (Bạn sẽ build từ Dockerfile) ---
+  legacy-adapter:
+    build: ./legacy_adapter
+    container_name: legacy_adapter
+    restart: always
+    volumes:
+      - ./shared_data/input:/app/input # Thư mục chứa file inventory.csv 
+      - ./shared_data/processed:/app/processed # Thư mục dọn dẹp 
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_USER: root
+      MYSQL_PASSWORD: root
+      MYSQL_DATABASE: noah_sales
+      REDIS_HOST: redis
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - noah_network
+
+  order-api:
+    build: ./order_api
+    container_name: order_api_server
+    restart: always
+    ports:
+      - "8001:8000"  # API endpoint
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_USER: root
+      MYSQL_PASSWORD: root
+      MYSQL_DATABASE: noah_sales
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+      POSTGRES_DATABASE: noah_finance
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      REDIS_HOST: redis
+    depends_on:
+      - mysql
+      - postgres
+      - rabbitmq
+      - redis
+    networks:
+      - noah_network
+
+  order-worker:
+    build: ./order_worker
+    container_name: order_worker_server
+    restart: always
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_USER: root
+      MYSQL_PASSWORD: root
+      MYSQL_DATABASE: noah_sales
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+      POSTGRES_DATABASE: noah_finance
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+    depends_on:
+      - mysql
+      - postgres
+      - rabbitmq
+    networks:
+      - noah_network
+
+  # --- FRONTEND (DASHBOARD) ---
+  dashboard:
+    build: ./dashboard
+    container_name: dashboard_ui
+    restart: always
+    ports:
+      - "3000:3000"  # Frontend UI
+    environment:
+      VITE_API_BASE_URL: http://localhost:8001
+    depends_on:
+      - order-api
+    networks:
+      - noah_network
+
+volumes:
+  mysql_data:
+  postgres_data:
+
+networks:
+  noah_network:
+    driver: bridge
