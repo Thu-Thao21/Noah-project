@@ -12,6 +12,8 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "3307:3306"
     networks:
       - noah_network
 
@@ -25,6 +27,8 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres_init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
     networks:
       - noah_network
 

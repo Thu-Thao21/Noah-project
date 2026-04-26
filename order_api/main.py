@@ -161,22 +161,33 @@ class OrderAPIHandler(BaseHTTPRequestHandler):
         """GET /report - Data Stitching (MySQL + PostgreSQL)"""
         try:
             # MySQL: Get orders
+            print("[INFO] Fetching orders from MySQL...")
             mysql_db = get_db_connection()
             mysql_cursor = mysql_db.cursor(dictionary=True)
             mysql_cursor.execute("SELECT id, user_id, product_id, quantity, total_price, status FROM orders")
             orders = mysql_cursor.fetchall()
             mysql_cursor.close()
             mysql_db.close()
+            print(f"[INFO] Got {len(orders)} orders from MySQL")
             
             # PostgreSQL: Get payments
+            print("[INFO] Fetching payments from PostgreSQL...")
+            payments = []
             postgres_db = get_postgres_connection()
             if postgres_db:
-                postgres_cursor = postgres_db.cursor()
-                postgres_cursor.execute("SELECT order_id, user_id, amount, status FROM payments LIMIT 1000")
-                payments = postgres_cursor.fetchall()
-                postgres_cursor.close()
-                postgres_db.close()
+                try:
+                    postgres_cursor = postgres_db.cursor()
+                    postgres_cursor.execute("SELECT order_id, user_id, amount, status FROM payments")
+                    payments_raw = postgres_cursor.fetchall()
+                    payments = [(p[0], p[1], p[2], p[3]) for p in payments_raw]  # Ensure tuple format
+                    postgres_cursor.close()
+                    postgres_db.close()
+                    print(f"[INFO] Got {len(payments)} payments from PostgreSQL")
+                except Exception as pg_error:
+                    print(f"[ERROR] PostgreSQL query failed: {pg_error}")
+                    payments = []
             else:
+                print("[WARN] PostgreSQL connection unavailable")
                 payments = []
             
             # Data Stitching: Calculate metrics
@@ -184,13 +195,10 @@ class OrderAPIHandler(BaseHTTPRequestHandler):
             completed_orders = 0
             failed_orders = 0
             
-            # Build order_id -> status mapping
-            order_status_map = {o['id']: o['status'] for o in orders}
-            
             # Calculate from payments
             for payment in payments:
-                if payment[3] == 'COMPLETED':  # payment status
-                    total_revenue += payment[2]  # amount
+                if len(payment) > 3 and payment[3] == 'COMPLETED':  # payment status
+                    total_revenue += float(payment[2]) if payment[2] else 0  # amount
             
             # Calculate from orders
             completed_orders = len([o for o in orders if o['status'] == 'COMPLETED'])
@@ -218,7 +226,7 @@ class OrderAPIHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({
                 "success": True,
-                "total_revenue": float(total_revenue) if isinstance(total_revenue, Decimal) else total_revenue,
+                "total_revenue": float(total_revenue),
                 "orders_completed": completed_orders,
                 "orders_failed": failed_orders,
                 "error_rate": f"{error_rate:.2f}%",
@@ -228,7 +236,9 @@ class OrderAPIHandler(BaseHTTPRequestHandler):
             }, cls=DecimalEncoder).encode())
             
         except Exception as e:
+            import traceback
             print(f"[ERROR] GET /report failed: {e}")
+            print(traceback.format_exc())
             self.send_response(500)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
