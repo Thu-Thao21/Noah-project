@@ -63,6 +63,11 @@ Thumbs.db
 *.bak
 temp/
 
+# Generated files & documentation
+generate_*.py
+*.docx
+*.pdf
+
 # CSV processed files
 shared_data/processed/
 shared_data/input/
